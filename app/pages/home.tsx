@@ -29,7 +29,7 @@ export default async function HomePage() {
 	]);
 	const memberIds = [...new Set((allMembers ?? []).map((member) => member.user_id))];
 	const { data: profiles } = memberIds.length
-		? await supabase.from("profiles").select("id, username, display_name, email").in("id", memberIds)
+		? await supabase.from("profiles").select("id, username, display_name, email, avatar_url").in("id", memberIds)
 		: { data: [] };
 	const profileMap = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
 	const membersByConversation = new Map<string, string[]>();
@@ -56,6 +56,7 @@ export default async function HomePage() {
 			lastMessageAt: latestMessage?.created_at,
 			initials: name.split(" ").map((part: string) => part[0]).join("").slice(0, 2).toUpperCase(),
 			color: avatarColors[index % avatarColors.length],
+			avatarUrl: profile?.avatar_url ?? undefined,
 		};
 	});
 	const homeMessages: HomeMessage[] = ((allMessages ?? []) as DatabaseMessage[]).map((message) => ({

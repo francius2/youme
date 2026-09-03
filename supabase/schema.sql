@@ -97,6 +97,26 @@ insert into storage.buckets (id, name, public)
 values ('attachments', 'attachments', true)
 on conflict (id) do update set public = true;
 
+insert into storage.buckets (id, name, public)
+values ('avatars', 'avatars', true)
+on conflict (id) do update set public = true;
+
+drop policy if exists "Users can upload avatars" on storage.objects;
+create policy "Users can upload avatars"
+  on storage.objects for insert to authenticated
+  with check (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
+
+drop policy if exists "Users can update avatars" on storage.objects;
+create policy "Users can update avatars"
+  on storage.objects for update to authenticated
+  using (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text)
+  with check (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
+
+drop policy if exists "Users can delete avatars" on storage.objects;
+create policy "Users can delete avatars"
+  on storage.objects for delete to authenticated
+  using (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
+
 drop policy if exists "Members can upload attachments" on storage.objects;
 create policy "Members can upload attachments"
   on storage.objects for insert to authenticated
@@ -181,6 +201,13 @@ create policy "Users can create conversations"
   with check (auth.uid() is not null);
 create policy "Members can view their conversations"
   on public.conversations for select
+  using (
+    public.is_conversation_member(conversations.id, auth.uid())
+  );
+
+drop policy if exists "Members can delete their conversations" on public.conversations;
+create policy "Members can delete their conversations"
+  on public.conversations for delete
   using (
     public.is_conversation_member(conversations.id, auth.uid())
   );

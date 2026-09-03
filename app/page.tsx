@@ -1,10 +1,12 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import ForgotPassword from "@/components/partials/forgotPassword";
 import LoginForm from "@/components/partials/loginForm";
 import SignUp from "@/components/partials/signUp";
+import { createClient } from "@/lib/supabase/client";
 
 type Conversation = {
   id: string;
@@ -79,9 +81,11 @@ function Avatar({ conversation, large = false }: { conversation: Conversation; l
 }
 
 export default function Home() {
+  const router = useRouter();
   const [showLogin, setShowLogin] = useState(false);
   const [showSignUp, setShowSignUp] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [selectedId, setSelectedId] = useState("benj");
   const [query, setQuery] = useState("");
   const [draft, setDraft] = useState("");
@@ -89,6 +93,30 @@ export default function Home() {
   const filteredConversations = conversations.filter((conversation) =>
     conversation.name.toLowerCase().includes(query.toLowerCase()),
   );
+
+  useEffect(() => {
+    const supabase = createClient();
+    let isMounted = true;
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (isMounted) {
+        setIsAuthenticated(Boolean(session));
+      }
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsAuthenticated(Boolean(session));
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  function openConversation() {
+    router.push("/pages/home");
+  }
 
   function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -100,8 +128,8 @@ export default function Home() {
       <div className="ambient ambient-one" />
       <div className="ambient ambient-two" />
       <nav className="landing-nav" aria-label="Main navigation">
-        <a className="nav-brand" href="#top"><span className="brand-mark">y</span><span>youme</span></a>
-        <div className="nav-links"><a className="nav-link-active" href="#why-youme">Why youme</a><a href="#privacy">Privacy</a><button className="login-link" onClick={() => setShowLogin(true)}>Log in <span>↗</span></button></div>
+        <a className="nav-brand" href="#top"><span className="brand-mark">y</span><span className="brand-wordmark">youme</span></a>
+        <div className="nav-links"><a className="nav-link-active" href="#why-youme">Why youme</a><a href="#privacy">Privacy</a>{isAuthenticated ? <button className="login-link" onClick={openConversation}>Conversation <span>↗</span></button> : <button className="login-link" onClick={() => setShowLogin(true)}>Log in <span>↗</span></button>}</div>
       </nav>
       <motion.section
         className="hero"
@@ -153,7 +181,7 @@ export default function Home() {
               >
                 <h1>Make space for the <em>moments</em> that matter.</h1>
                 <p className="hero-description">YouMe is a quieter place for your people. Share the everyday stuff, stay close from anywhere, and keep your conversations truly yours.</p>
-                <div className="hero-actions" id="start"><button className="primary-button" onClick={() => setShowLogin(true)}>Get started <span>↗</span></button><a className="text-button" href="#preview">See how it feels <span>↓</span></a></div>
+                <div className="hero-actions" id="start"><button className="primary-button" onClick={isAuthenticated ? openConversation : () => setShowLogin(true)}>{isAuthenticated ? "Conversation" : "Get started"} <span>↗</span></button><a className="text-button" href="#preview">See how it feels <span>↓</span></a></div>
                 <div className="hero-proof"><div className="proof-avatars"><span>MC</span><span>LP</span><span>JM</span></div><span>Made for the people<br />you actually talk to.</span></div>
               </motion.div>
             )}
@@ -178,24 +206,8 @@ export default function Home() {
         <div className="preview-heading"><p className="eyebrow"><span /> Inside youme</p><h2>A home for your <em>real</em> conversations.</h2><p>Simple by design. Personal by nature.</p></div>
         <div className="messenger" aria-label="YouMe messaging app preview">
         <aside className="sidebar">
-          <div className="brand-row">
-            <div className="brand-mark">y</div>
-            <span className="brand-name">youme</span>
-            <button className="icon-button menu-button" aria-label="Open menu">•••</button>
-          </div>
-
-          <div className="profile-row">
-            <div className="profile-avatar">AM</div>
-            <div>
-              <strong>Alex Morgan</strong>
-              <span className="muted-text">@alexmorgan</span>
-            </div>
-            <span className="status-dot" />
-          </div>
-
           <div className="sidebar-heading">
             <span>Messages</span>
-            <button className="new-message" aria-label="Start a new message">+</button>
           </div>
           <label className="search-box">
             <span aria-hidden="true">⌕</span>
@@ -222,7 +234,7 @@ export default function Home() {
 
         <section className="chat-panel">
           <header className="chat-header">
-            <div className="mobile-brand"><span className="brand-mark">y</span> youme</div>
+            <div className="mobile-brand"><span className="brand-mark">y</span><span className="brand-wordmark">youme</span></div>
             <div className="chat-person"><Avatar conversation={selected} large /><div><h1>{selected.name}</h1><span>{selected.online ? "Active now" : selected.handle}</span></div></div>
             <div className="chat-actions"><button className="icon-button" aria-label="Start audio call">◡</button><button className="icon-button" aria-label="More options">•••</button></div>
           </header>

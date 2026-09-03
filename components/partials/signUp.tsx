@@ -48,15 +48,15 @@ export default function SignUp({ onBack }: SignUpProps) {
 	}
 
 	return (
-		<Card className="login-card border-[#e8e5df] bg-white/85 shadow-[0_18px_50px_rgba(61,65,52,.08)] backdrop-blur-sm">
-			<CardHeader className="gap-0 px-7 pb-5 pt-1">
+		<Card className="login-card signup-form-card w-full border-[#e8e5df] bg-white/85 shadow-[0_18px_50px_rgba(61,65,52,.08)] backdrop-blur-sm">
+			<CardHeader className="gap-0 px-5 pb-5 pt-1 sm:px-7">
 				<Button className="back-link -ml-3 mb-6 h-8 w-fit gap-2 rounded-full px-3" variant="ghost" size="sm" onClick={onBack}>
 					<ArrowLeft aria-hidden="true" size={13} />
 					Back to youme
 				</Button>
-				<CardTitle><h1>Create your account.</h1></CardTitle>
+				<CardTitle><h1>Create your <em>account.</em></h1></CardTitle>
 			</CardHeader>
-			<CardContent className="px-7 pb-6">
+			<CardContent className="px-5 pb-6 sm:px-7">
 				<form className="login-form gap-5" onSubmit={handleSubmit}>
 					<div className="grid gap-2">
 						<Label className="text-[10px] uppercase tracking-[.08em] text-[#607069]" htmlFor="signup-email">Email address</Label>
@@ -72,7 +72,7 @@ export default function SignUp({ onBack }: SignUpProps) {
 					</Button>
 				</form>
 			</CardContent>
-			<CardFooter className="flex-col gap-4 border-0 bg-transparent px-7 pb-7 pt-0">
+			<CardFooter className="flex-col gap-4 border-0 bg-transparent px-5 pb-7 pt-0 sm:px-7">
 				<div className="flex items-center gap-2 text-[10px] text-[#91a098]"><ShieldCheck aria-hidden="true" size={14} className="text-[#77a78a]" />Your conversations stay private.</div>
 			</CardFooter>
 		</Card>
