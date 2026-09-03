@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import HomeExperience, { type HomeConversation, type HomeMessage } from "@/components/homeExperience";
 
 const avatarColors = ["#e48a67", "#a3b18a", "#8d9ec6", "#d4a373"];
-type DatabaseMessage = { id: number; conversation_id: string; sender_id: string; body: string; created_at: string };
+type DatabaseMessage = { id: number; conversation_id: string; sender_id: string; body: string; attachment_url: string | null; attachment_name: string | null; attachment_type: string | null; created_at: string };
 
 function formatMessageTime(timestamp: string) {
 	return new Date(timestamp).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -25,7 +25,7 @@ export default async function HomePage() {
 	const [{ data: conversations }, { data: allMembers }, { data: allMessages }] = await Promise.all([
 		conversationIds.length ? supabase.from("conversations").select("id").in("id", conversationIds) : Promise.resolve({ data: [] }),
 		conversationIds.length ? supabase.from("conversation_members").select("conversation_id, user_id").in("conversation_id", conversationIds) : Promise.resolve({ data: [] }),
-		conversationIds.length ? supabase.from("messages").select("id, conversation_id, sender_id, body, created_at").in("conversation_id", conversationIds).order("created_at", { ascending: true }) : Promise.resolve({ data: [] }),
+		conversationIds.length ? supabase.from("messages").select("id, conversation_id, sender_id, body, attachment_url, attachment_name, attachment_type, created_at").in("conversation_id", conversationIds).order("created_at", { ascending: true }) : Promise.resolve({ data: [] }),
 	]);
 	const memberIds = [...new Set((allMembers ?? []).map((member) => member.user_id))];
 	const { data: profiles } = memberIds.length
@@ -51,7 +51,7 @@ export default async function HomePage() {
 			name,
 			email: profile?.email ?? "",
 			handle: profile?.username ? `@${profile.username}` : "youme member",
-			preview: latestMessage?.body ?? "No messages yet",
+			preview: latestMessage?.body || (latestMessage?.attachment_name ? `Attachment: ${latestMessage.attachment_name}` : "No messages yet"),
 			time: latestMessage ? formatMessageTime(latestMessage.created_at) : "New",
 			lastMessageAt: latestMessage?.created_at,
 			initials: name.split(" ").map((part: string) => part[0]).join("").slice(0, 2).toUpperCase(),
@@ -62,7 +62,10 @@ export default async function HomePage() {
 		id: String(message.id),
 		conversationId: message.conversation_id,
 		from: message.sender_id === user.id ? "me" : "them",
-		text: message.body,
+		text: message.body || (message.attachment_name ? `Attachment: ${message.attachment_name}` : "Attachment"),
+		attachmentUrl: message.attachment_url ?? undefined,
+		attachmentName: message.attachment_name ?? undefined,
+		attachmentType: message.attachment_type ?? undefined,
 		time: formatMessageTime(message.created_at),
 		createdAt: message.created_at,
 	}));

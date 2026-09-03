@@ -33,9 +33,32 @@ create table if not exists public.messages (
   id bigint generated always as identity primary key,
   conversation_id uuid not null references public.conversations(id) on delete cascade,
   sender_id uuid not null references auth.users(id) on delete cascade,
-  body text not null check (char_length(body) > 0),
+  body text not null default '',
+  attachment_url text,
+  attachment_name text,
+  attachment_type text,
   created_at timestamptz not null default now()
 );
+
+alter table public.messages add column if not exists attachment_url text;
+alter table public.messages add column if not exists attachment_name text;
+alter table public.messages add column if not exists attachment_type text;
+alter table public.messages alter column body set default '';
+alter table public.messages drop constraint if exists messages_body_check;
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'messages_body_or_attachment_check'
+      and conrelid = 'public.messages'::regclass
+  ) then
+    alter table public.messages
+      add constraint messages_body_or_attachment_check
+      check (char_length(body) > 0 or attachment_url is not null);
+  end if;
+end;
+$$;
 
 do $$
 begin
@@ -69,6 +92,26 @@ $$;
 
 revoke execute on function public.is_conversation_member(uuid, uuid) from public;
 grant execute on function public.is_conversation_member(uuid, uuid) to authenticated;
+
+insert into storage.buckets (id, name, public)
+values ('attachments', 'attachments', true)
+on conflict (id) do update set public = true;
+
+drop policy if exists "Members can upload attachments" on storage.objects;
+create policy "Members can upload attachments"
+  on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'attachments'
+    and public.is_conversation_member((storage.foldername(name))[1]::uuid, auth.uid())
+  );
+
+drop policy if exists "Members can delete their attachments" on storage.objects;
+create policy "Members can delete their attachments"
+  on storage.objects for delete to authenticated
+  using (
+    bucket_id = 'attachments'
+    and (storage.foldername(name))[2] = auth.uid()::text
+  );
 
 create or replace function public.create_conversation(target_user_id uuid)
 returns uuid
@@ -167,6 +210,26 @@ drop policy if exists "Members can send messages" on public.messages;
 create policy "Members can send messages"
   on public.messages for insert
   with check (
+    sender_id = auth.uid()
+    and public.is_conversation_member(messages.conversation_id, auth.uid())
+  );
+
+drop policy if exists "Members can update their messages" on public.messages;
+create policy "Members can update their messages"
+  on public.messages for update
+  using (
+    sender_id = auth.uid()
+    and public.is_conversation_member(messages.conversation_id, auth.uid())
+  )
+  with check (
+    sender_id = auth.uid()
+    and public.is_conversation_member(messages.conversation_id, auth.uid())
+  );
+
+drop policy if exists "Members can delete their messages" on public.messages;
+create policy "Members can delete their messages"
+  on public.messages for delete
+  using (
     sender_id = auth.uid()
     and public.is_conversation_member(messages.conversation_id, auth.uid())
   );

@@ -1,10 +1,11 @@
 "use client";
 
-import { Search, Settings, ShieldCheck, Sparkles, Video, Phone, MoreHorizontal, Send, Paperclip, Smile, X, UserPlus } from "lucide-react";
+import { Search, Settings, ShieldCheck, Sparkles, Video, Phone, MoreHorizontal, Send, Paperclip, Smile, X, UserPlus, Image as ImageIcon, FileText, FileQuestion } from "lucide-react";
 import EmojiPicker, { type EmojiClickData } from "emoji-picker-react";
 import Link from "next/link";
+import NextImage from "next/image";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 type Conversation = {
@@ -22,10 +23,11 @@ type Conversation = {
 };
 
 export type HomeConversation = Conversation;
-export type HomeMessage = { id: string; conversationId: string; from: "them" | "me"; text: string; time: string; createdAt: string };
+export type HomeMessage = { id: string; conversationId: string; from: "them" | "me"; text: string; time: string; createdAt: string; attachmentUrl?: string; attachmentName?: string; attachmentType?: string };
 type ProfileResult = { id: string; display_name: string | null; username: string | null; email: string | null };
-type DatabaseMessage = { id: number; conversation_id: string; sender_id: string; body: string; created_at: string };
+type DatabaseMessage = { id: number; conversation_id: string; sender_id: string; body: string; attachment_url: string | null; attachment_name: string | null; attachment_type: string | null; created_at: string };
 type Appearance = "light" | "dark";
+type AttachmentKind = "image" | "video" | "document" | "other";
 
 function subscribeToAppearance(callback: () => void) {
   window.addEventListener("storage", callback);
@@ -40,6 +42,19 @@ function Avatar({ conversation, large = false }: { conversation: Conversation; l
   return <div className={`avatar ${large ? "avatar-large" : ""}`} style={{ backgroundColor: conversation.color }} aria-hidden="true">{conversation.initials}</div>;
 }
 
+function AttachmentPreview({ file, onRemove }: { file: File; onRemove: () => void }) {
+  const previewUrl = useMemo(() => file.type.startsWith("image/") || file.type.startsWith("video/") ? URL.createObjectURL(file) : "", [file]);
+
+  useEffect(() => () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+  }, [previewUrl]);
+
+  const isImage = file.type.startsWith("image/");
+  const isVideo = file.type.startsWith("video/");
+
+  return <div className="attachment-preview"><button type="button" className="reply-preview-close" aria-label="Remove attachment" onClick={onRemove}><X size={12} /></button>{previewUrl && isImage ? <NextImage src={previewUrl} alt={`Preview of ${file.name}`} width={174} height={105} unoptimized /> : previewUrl && isVideo ? <video src={previewUrl} controls preload="metadata" aria-label={`Preview of ${file.name}`} /> : <span className="attachment-file-icon"><FileText size={15} /></span>}<div className="attachment-preview-copy"><span>{isImage ? "Image" : isVideo ? "Video" : "Attachment"}</span><p>{file.name}</p></div></div>;
+}
+
 export default function HomeExperience({ email, userId, conversations, messages }: { email: string; userId: string; conversations: HomeConversation[]; messages: HomeMessage[] }) {
   const router = useRouter();
   const [conversationList, setConversationList] = useState(conversations);
@@ -48,6 +63,15 @@ export default function HomeExperience({ email, userId, conversations, messages 
   const [query, setQuery] = useState("");
   const [draft, setDraft] = useState("");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showAttachmentPicker, setShowAttachmentPicker] = useState(false);
+  const [, setAttachmentName] = useState("");
+  const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
+  const [attachmentAccept, setAttachmentAccept] = useState("");
+  const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
+  const [reactionMessageId, setReactionMessageId] = useState<string | null>(null);
+  const [messageReactions, setMessageReactions] = useState<Record<string, string>>({});
+  const [replyingToMessageText, setReplyingToMessageText] = useState("");
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [sendError, setSendError] = useState("");
   const [realtimeError, setRealtimeError] = useState("");
@@ -62,6 +86,10 @@ export default function HomeExperience({ email, userId, conversations, messages 
   const [isCreatingConversation, setIsCreatingConversation] = useState(false);
   const [dialogError, setDialogError] = useState("");
   const chatContentRef = useRef<HTMLDivElement>(null);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
+  const longPressTimerRef = useRef<number | null>(null);
+  const longPressTriggeredRef = useRef(false);
+  const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
   const selected = conversationList.find((conversation) => conversation.id === selectedId) ?? conversationList[0];
   const normalizedQuery = query.trim().toLowerCase();
   const filteredConversations = conversationList.filter((conversation) =>
@@ -82,7 +110,7 @@ export default function HomeExperience({ email, userId, conversations, messages 
     setConversationList((current) => current
       .map((conversation) => conversation.id === message.conversation_id ? {
         ...conversation,
-        preview: message.body,
+        preview: message.body || (message.attachment_name ? `Attachment: ${message.attachment_name}` : "No messages yet"),
         time: new Date(message.created_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
         lastMessageAt: message.created_at,
       } : conversation)
@@ -92,6 +120,34 @@ export default function HomeExperience({ email, userId, conversations, messages 
   useEffect(() => {
     chatContentRef.current?.scrollTo({ top: chatContentRef.current.scrollHeight, behavior: "smooth" });
   }, [messageList, selectedId]);
+
+  useEffect(() => {
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setReactionMessageId(null);
+      }
+    }
+
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, []);
+
+  useEffect(() => {
+    if (!reactionMessageId) return;
+
+    function handlePointerDown(event: MouseEvent) {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      const picker = document.querySelector(".message-reaction-picker");
+      const bubble = target.closest(".bubble");
+      if (!picker || (!picker.contains(target) && !bubble)) {
+        setReactionMessageId(null);
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [reactionMessageId]);
 
   useEffect(() => {
     const searchTerm = participantEmail.trim();
@@ -130,7 +186,7 @@ export default function HomeExperience({ email, userId, conversations, messages 
     async function syncMessages() {
       const { data, error } = await supabase
         .from("messages")
-        .select("id, conversation_id, sender_id, body, created_at")
+        .select("id, conversation_id, sender_id, body, attachment_url, attachment_name, attachment_type, created_at")
         .eq("conversation_id", selectedId)
         .order("created_at", { ascending: true });
 
@@ -146,7 +202,10 @@ export default function HomeExperience({ email, userId, conversations, messages 
           id: String(message.id),
           conversationId: message.conversation_id,
           from: message.sender_id === userId ? "me" as const : "them" as const,
-          text: message.body,
+          text: message.body || (message.attachment_name ? `Attachment: ${message.attachment_name}` : "Attachment"),
+          attachmentUrl: message.attachment_url ?? undefined,
+          attachmentName: message.attachment_name ?? undefined,
+          attachmentType: message.attachment_type ?? undefined,
           time: new Date(message.created_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
           createdAt: message.created_at,
         }));
@@ -167,7 +226,10 @@ export default function HomeExperience({ email, userId, conversations, messages 
           id: String(message.id),
           conversationId: message.conversation_id,
           from: message.sender_id === userId ? "me" : "them",
-          text: message.body,
+          text: message.body || (message.attachment_name ? `Attachment: ${message.attachment_name}` : "Attachment"),
+          attachmentUrl: message.attachment_url ?? undefined,
+          attachmentName: message.attachment_name ?? undefined,
+          attachmentType: message.attachment_type ?? undefined,
           time: new Date(message.created_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
           createdAt: message.created_at,
         }]);
@@ -191,19 +253,62 @@ export default function HomeExperience({ email, userId, conversations, messages 
   async function sendMessage(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const body = draft.trim();
-    if (!body || !selected) return;
+    if ((!body && !attachmentFile) || !selected) return;
+
+    if (editingMessageId) {
+      const { data, error } = await createClient().from("messages").update({ body }).eq("id", Number(editingMessageId)).select("id, conversation_id, sender_id, body, attachment_url, attachment_name, attachment_type, created_at").single();
+      if (error) {
+        setSendError(error.message);
+        return;
+      }
+
+      const updatedMessage = data as DatabaseMessage;
+      setMessageList((current) => current.map((message) => message.id === editingMessageId ? {
+        ...message,
+        text: updatedMessage.body,
+        time: new Date(updatedMessage.created_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
+        createdAt: updatedMessage.created_at,
+      } : message));
+      updateConversationPreview(updatedMessage);
+      setEditingMessageId(null);
+      setDraft("");
+      setSendError("");
+      setShowEmojiPicker(false);
+      setExpandedMessageId(editingMessageId);
+      return;
+    }
 
     setIsSending(true);
     setSendError("");
     setDraft("");
     setShowEmojiPicker(false);
-    const { data, error } = await createClient().from("messages").insert({
+    const supabase = createClient();
+    let attachmentUrl: string | null = null;
+    let attachmentPath = "";
+    if (attachmentFile) {
+      const safeFileName = attachmentFile.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      attachmentPath = `${selected.id}/${userId}/${crypto.randomUUID()}-${safeFileName}`;
+      const { error: uploadError } = await supabase.storage.from("attachments").upload(attachmentPath, attachmentFile, { contentType: attachmentFile.type || undefined });
+      if (uploadError) {
+        setDraft(body);
+        setSendError("Could not upload the attachment. Check your Supabase storage policies.");
+        setIsSending(false);
+        return;
+      }
+      attachmentUrl = supabase.storage.from("attachments").getPublicUrl(attachmentPath).data.publicUrl;
+    }
+
+    const { data, error } = await supabase.from("messages").insert({
       conversation_id: selected.id,
       sender_id: userId,
       body,
-    }).select("id, conversation_id, sender_id, body, created_at").single();
+      attachment_url: attachmentUrl,
+      attachment_name: attachmentFile?.name ?? null,
+      attachment_type: attachmentFile?.type ?? null,
+    }).select("id, conversation_id, sender_id, body, attachment_url, attachment_name, attachment_type, created_at").single();
 
     if (error) {
+      if (attachmentPath) await supabase.storage.from("attachments").remove([attachmentPath]);
       setDraft(body);
       setSendError(error.message);
       setIsSending(false);
@@ -215,11 +320,15 @@ export default function HomeExperience({ email, userId, conversations, messages 
       id: String(message.id),
       conversationId: message.conversation_id,
       from: "me",
-      text: message.body,
+      text: message.body || (message.attachment_name ? `Attachment: ${message.attachment_name}` : "Attachment"),
+      attachmentUrl: message.attachment_url ?? undefined,
+      attachmentName: message.attachment_name ?? undefined,
+      attachmentType: message.attachment_type ?? undefined,
       time: new Date(message.created_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
       createdAt: message.created_at,
     }]);
     updateConversationPreview(message);
+    setAttachmentFile(null);
     setIsSending(false);
   }
 
@@ -282,7 +391,139 @@ export default function HomeExperience({ email, userId, conversations, messages 
 
   function addEmoji(emojiData: EmojiClickData) {
     setDraft((currentDraft) => `${currentDraft}${emojiData.emoji}`);
+  }
+
+  function closeEmojiPicker() {
     setShowEmojiPicker(false);
+  }
+
+  function openAttachmentPicker(kind: AttachmentKind) {
+    const acceptByKind: Record<AttachmentKind, string> = {
+      image: "image/*",
+      video: "video/*",
+      document: ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv",
+      other: "",
+    };
+    setAttachmentAccept(acceptByKind[kind]);
+    setShowAttachmentPicker(false);
+    window.setTimeout(() => attachmentInputRef.current?.click(), 0);
+  }
+
+  function handleAttachmentChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    setAttachmentFile(file);
+    event.target.value = "";
+    window.setTimeout(() => document.querySelector<HTMLInputElement>('input[aria-label="Message"]')?.focus(), 0);
+  }
+
+  function startLongPress(messageId: string) {
+    cancelLongPress();
+    longPressTimerRef.current = window.setTimeout(() => {
+      setReactionMessageId(messageId);
+      longPressTriggeredRef.current = true;
+    }, 420);
+  }
+
+  function cancelLongPress() {
+    if (longPressTimerRef.current) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }
+
+  function handleBubbleClick(messageId: string, event?: React.MouseEvent<HTMLButtonElement>) {
+    if (event && event.detail === 2) {
+      setMessageReactions((current) => {
+        const existing = current[messageId];
+        if (existing === "❤️") {
+          const next = { ...current };
+          delete next[messageId];
+          return next;
+        }
+
+        return { ...current, [messageId]: "❤️" };
+      });
+      setReactionMessageId(null);
+      return;
+    }
+
+    if (longPressTriggeredRef.current) {
+      longPressTriggeredRef.current = false;
+      return;
+    }
+
+    setExpandedMessageId((current) => current === messageId ? null : messageId);
+  }
+
+  function handleReactionSelect(messageId: string, emoji: string) {
+    setMessageReactions((current) => {
+      const existing = current[messageId];
+      if (existing === emoji) {
+        const next = { ...current };
+        delete next[messageId];
+        return next;
+      }
+
+      return { ...current, [messageId]: emoji };
+    });
+    setReactionMessageId(null);
+    cancelLongPress();
+  }
+
+  async function handleMessageAction(messageId: string, action: "edit" | "delete") {
+    if (action === "edit") {
+      const target = messageList.find((message) => message.id === messageId);
+      if (target) {
+        setDraft(target.text);
+        setEditingMessageId(messageId);
+      }
+    }
+
+    if (action === "delete") {
+      const { error } = await createClient().from("messages").delete().eq("id", Number(messageId));
+      if (error) {
+        setSendError(error.message);
+        setReactionMessageId(null);
+        return;
+      }
+
+      setMessageList((current) => {
+        const nextMessages = current.filter((message) => message.id !== messageId);
+        const latestMessage = [...nextMessages].filter((message) => message.conversationId === selected?.id).at(-1);
+        setConversationList((currentConversations) => currentConversations.map((conversation) => conversation.id === selected?.id ? {
+          ...conversation,
+          preview: latestMessage?.text ?? "No messages yet",
+          time: latestMessage ? latestMessage.time : "New",
+          lastMessageAt: latestMessage?.createdAt,
+        } : conversation));
+        return nextMessages;
+      });
+    }
+
+    setReactionMessageId(null);
+    setExpandedMessageId(null);
+  }
+
+  function handleSwipeReplyStart(message: HomeMessage, event: React.PointerEvent<HTMLButtonElement>) {
+    if (message.from !== "them") return;
+    swipeStartRef.current = { x: event.clientX, y: event.clientY };
+  }
+
+  function handleSwipeReplyEnd(message: HomeMessage, event: React.PointerEvent<HTMLButtonElement>) {
+    if (message.from !== "them" || !swipeStartRef.current) return;
+
+    const deltaX = event.clientX - swipeStartRef.current.x;
+    const deltaY = Math.abs(event.clientY - swipeStartRef.current.y);
+    if (deltaX > 60 && deltaX > deltaY * 1.3) {
+      setReplyingToMessageText(message.text);
+      setExpandedMessageId(message.id);
+      setDraft("");
+    }
+    swipeStartRef.current = null;
+  }
+
+  function clearReply() {
+    setReplyingToMessageText("");
   }
 
   function selectConversation(conversation: HomeConversation) {
@@ -326,11 +567,12 @@ export default function HomeExperience({ email, userId, conversations, messages 
         </aside>
         <section className="chat-panel">
           <header className="chat-header"><div className="mobile-brand"><span className="brand-mark">y</span> youme</div>{selected ? <><div className="chat-person"><Avatar conversation={selected} large /><div><h1>{selected.name}</h1><span>{selected.handle}</span></div></div><div className="chat-actions"><button className="icon-button" aria-label="Start video call"><Video size={16} /></button><button className="icon-button" aria-label="Start audio call"><Phone size={15} /></button><button className="icon-button" aria-label="More options"><MoreHorizontal size={17} /></button></div></> : <span className="chat-empty-label">Choose a conversation</span>}</header>
-          <div className="chat-content" ref={chatContentRef}>{selected ? <><div className="day-divider"><span>Today</span></div><div className="message-intro"><Avatar conversation={selected} large /><h2>{selected.name}</h2><p>{selected.handle} · youme member</p></div>{realtimeError && <p className="realtime-error" role="status">{realtimeError}</p>}<div className="messages">{messageList.filter((message) => message.conversationId === selected.id).map((message) => <div className={`message-row ${message.from === "me" ? "message-mine" : ""}`} key={message.id}><div className="bubble">{message.text}<time>{message.time}</time></div></div>)}</div></> : <div className="empty-chat"><div className="empty-chat-mark"><Sparkles size={20} /></div><p className="empty-chat-eyebrow">A little room to breathe</p><h2>Your conversations will appear here.</h2><p>Start a conversation to make this space yours.</p></div>}</div>
-          {selected && <><form className="composer" onSubmit={sendMessage}><button type="button" className="add-button" aria-label="Add attachment"><Paperclip size={16} /></button><input value={draft} onChange={(event) => { setDraft(event.target.value); setSendError(""); }} placeholder="Write a message..." aria-label="Message" /><span className="emoji-picker-wrap"><button type="button" className="icon-button composer-icon" aria-label="Add emoji" aria-expanded={showEmojiPicker} onClick={() => setShowEmojiPicker((isOpen) => !isOpen)}><Smile size={16} /></button>{showEmojiPicker && <span className="emoji-picker" role="dialog" aria-label="Choose an emoji"><EmojiPicker onEmojiClick={addEmoji} width={300} height={350} /></span>}</span><button type="submit" className="send-button" aria-label="Send message" disabled={!draft.trim() || isSending}><Send size={14} /></button></form>{sendError && <p className="send-error" role="status">Could not send message. Check your Supabase message insert policy.</p>}</>}
+          <div className="chat-content" ref={chatContentRef}>{selected ? <><div className="day-divider"><span>Today</span></div><div className="message-intro"><Avatar conversation={selected} large /><h2>{selected.name}</h2><p>{selected.handle} · youme member</p></div>{realtimeError && <p className="realtime-error" role="status">{realtimeError}</p>}<div className="messages">{messageList.filter((message) => message.conversationId === selected.id).map((message) => { const isExpanded = expandedMessageId === message.id; const selectedReaction = messageReactions[message.id]; return <div className={`message-row ${message.from === "me" ? "message-mine" : ""} ${isExpanded ? "message-expanded" : ""}`} key={message.id}>{reactionMessageId === message.id && <div className="message-reaction-picker" role="menu" aria-label="Message actions"><div className="message-reaction-grid"><button type="button" onClick={() => handleReactionSelect(message.id, "👍")} aria-label="React with thumbs up">👍</button><button type="button" onClick={() => handleReactionSelect(message.id, "❤️")} aria-label="React with heart">❤️</button><button type="button" onClick={() => handleReactionSelect(message.id, "😂")} aria-label="React with laugh">😂</button><button type="button" onClick={() => handleReactionSelect(message.id, "🔥")} aria-label="React with fire">🔥</button></div>{message.from === "me" && <div className="message-action-row"><button type="button" onClick={() => handleMessageAction(message.id, "edit")}>Edit</button><button type="button" onClick={() => handleMessageAction(message.id, "delete")}>Delete</button></div>}</div>}<button type="button" className="bubble" aria-expanded={isExpanded} onPointerDown={(event) => { handleSwipeReplyStart(message, event); startLongPress(message.id); }} onPointerUp={(event) => { handleSwipeReplyEnd(message, event); cancelLongPress(); }} onPointerLeave={cancelLongPress} onPointerCancel={(event) => { handleSwipeReplyEnd(message, event); cancelLongPress(); }} onClick={(event) => handleBubbleClick(message.id, event)}><span className="bubble-text">{message.text}</span>{selectedReaction && <span className="bubble-reaction" aria-label={`Reaction: ${selectedReaction}`}>{selectedReaction}</span>}<time>{message.time}</time></button></div>; })}</div></> : <div className="empty-chat"><div className="empty-chat-mark"><Sparkles size={20} /></div><p className="empty-chat-eyebrow">A little room to breathe</p><h2>Your conversations will appear here.</h2><p>Start a conversation to make this space yours.</p></div>}</div>
+          {selected && <><form className="composer" onSubmit={sendMessage}>{replyingToMessageText && <div className="reply-preview"><button type="button" className="reply-preview-close" aria-label="Clear reply" onClick={clearReply}><X size={12} /></button><span>Replying to</span><p>{replyingToMessageText}</p></div>}{editingMessageId && <div className="reply-preview"><button type="button" className="reply-preview-close" aria-label="Cancel edit" onClick={() => { setEditingMessageId(null); setDraft(""); }}><X size={12} /></button><span>Editing message</span><p>Update your note below.</p></div>}{attachmentFile && <AttachmentPreview file={attachmentFile} onRemove={() => { setAttachmentFile(null); setAttachmentName(""); }} />}<button type="button" className="add-button" aria-label="Add attachment" aria-expanded={showAttachmentPicker} onClick={() => setShowAttachmentPicker(true)}><Paperclip size={16} /></button><input ref={attachmentInputRef} className="attachment-input" type="file" accept={attachmentAccept} onChange={handleAttachmentChange} tabIndex={-1} /><input value={draft} onChange={(event) => { setDraft(event.target.value); setSendError(""); }} placeholder={replyingToMessageText ? "Write a reply..." : "Write a message..."} aria-label="Message" /><span className="emoji-picker-wrap"><button type="button" className="icon-button composer-icon" aria-label="Add emoji" aria-expanded={showEmojiPicker} onClick={() => setShowEmojiPicker(true)}><Smile size={16} /></button>{showEmojiPicker && <span className="emoji-picker" role="dialog" aria-label="Choose an emoji" onMouseDown={(event) => event.stopPropagation()}><button type="button" className="emoji-picker-close" aria-label="Close emoji picker" onClick={closeEmojiPicker}><X size={14} /></button><EmojiPicker onEmojiClick={addEmoji} width={260} height={300} skinTonesDisabled previewConfig={{ showPreview: false }} /></span>}</span><button type="submit" className="send-button" aria-label={editingMessageId ? "Save edited message" : "Send message"} disabled={(!draft.trim() && !attachmentFile) || isSending}><Send size={14} /></button></form>{sendError && <p className="send-error" role="status">Could not send message. Check your Supabase message insert policy.</p>}</>}
         </section>
       </div>
       <footer className="page-footer"><span>Conversations with room to breathe.</span><span>Made for your people.</span></footer>
+      {showAttachmentPicker && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowAttachmentPicker(false); }}><section className="glass-dialog attachment-dialog" role="dialog" aria-modal="true" aria-labelledby="attachment-title"><button type="button" className="dialog-close" aria-label="Close attachment picker" onClick={() => setShowAttachmentPicker(false)}><X size={16} /></button><div className="dialog-icon"><Paperclip size={18} /></div><p className="eyebrow"><span /> Add something to share</p><h2 id="attachment-title">Choose a file.</h2><p className="dialog-description">Pick the kind of file you want to attach to this conversation.</p><div className="attachment-options"><button type="button" onClick={() => openAttachmentPicker("image")}><span className="attachment-option-icon attachment-image"><ImageIcon size={18} /></span><span><strong>Image</strong><small>JPG, PNG, GIF and more</small></span></button><button type="button" onClick={() => openAttachmentPicker("video")}><span className="attachment-option-icon attachment-video"><Video size={18} /></span><span><strong>Video</strong><small>MP4, MOV, WEBM and more</small></span></button><button type="button" onClick={() => openAttachmentPicker("document")}><span className="attachment-option-icon attachment-document"><FileText size={18} /></span><span><strong>Document</strong><small>PDF, DOCX, XLSX and more</small></span></button><button type="button" onClick={() => openAttachmentPicker("other")}><span className="attachment-option-icon attachment-other"><FileQuestion size={18} /></span><span><strong>Others</strong><small>Any other file format</small></span></button></div></section></div>}
       {showNewConversation && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeNewConversation(); }}><section className="glass-dialog" role="dialog" aria-modal="true" aria-labelledby="new-conversation-title"><button type="button" className="dialog-close" aria-label="Close new conversation dialog" onClick={closeNewConversation}><X size={16} /></button><div className="dialog-icon"><UserPlus size={18} /></div><p className="eyebrow"><span /> Make room for someone new</p><h2 id="new-conversation-title">Start a conversation.</h2><p className="dialog-description">Search by email to find someone you know on YouMe.</p><label className="dialog-label" htmlFor="participant-email">Their email address</label><div className="dialog-search-field"><input id="participant-email" className="dialog-input" type="email" value={participantEmail} onChange={(event) => { setParticipantEmail(event.target.value); setSelectedProfile(null); setProfileResults([]); setProfileSearchError(""); setDialogError(""); setIsSearchingProfiles(false); }} placeholder="friend@example.com" autoFocus />{(isSearchingProfiles || profileResults.length > 0 || profileSearchError) && <div className="profile-results" role="listbox" aria-label="Matching users">{isSearchingProfiles ? <p className="profile-result-status">Searching...</p> : profileSearchError ? <p className="profile-result-status">Search unavailable. Run the updated Supabase schema.</p> : profileResults.length ? profileResults.map((profile) => <button type="button" className="profile-result" key={profile.id} onClick={() => selectProfile(profile)}><span className="profile-result-avatar">{(profile.display_name ?? profile.email ?? "?").slice(0, 1).toUpperCase()}</span><span><strong>{profile.display_name ?? "YouMe member"}</strong><small>{profile.email}</small></span></button>) : <p className="profile-result-status">No matching users</p>}</div>}</div>{dialogError && <p className="profile-result-status dialog-error">{dialogError}</p>}<div className="dialog-actions"><button type="button" className="dialog-cancel" onClick={closeNewConversation}>Cancel</button><button type="button" className="dialog-submit" disabled={!selectedProfile || isCreatingConversation} onClick={createConversation}>{isCreatingConversation ? "Opening..." : "Continue"} <Send size={13} /></button></div></section></div>}
     </main>
   );

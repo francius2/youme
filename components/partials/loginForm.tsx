@@ -3,6 +3,7 @@
 import { ArrowLeft, ArrowUpRight, ShieldCheck } from "lucide-react";
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 
 import {
@@ -19,24 +20,24 @@ import { Label } from "@/components/ui/label";
 
 type LoginFormProps = {
 	onBack: () => void;
+	onCreateAccount: () => void;
+	onForgotPassword: () => void;
 };
 
-export default function LoginForm({ onBack }: LoginFormProps) {
+export default function LoginForm({ onBack, onCreateAccount, onForgotPassword }: LoginFormProps) {
 	const router = useRouter();
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
 	const [isLoading, setIsLoading] = useState(false);
-	const [message, setMessage] = useState("");
 
 	async function handleSubmit(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault();
 		setIsLoading(true);
-		setMessage("");
 
 		const { error } = await createClient().auth.signInWithPassword({ email, password });
 		if (error) {
 			setIsLoading(false);
-			setMessage(error.message);
+			toast.error(error.message);
 			return;
 		}
 
@@ -45,7 +46,6 @@ export default function LoginForm({ onBack }: LoginFormProps) {
 
 	async function handleGoogleSignIn() {
 		setIsLoading(true);
-		setMessage("");
 
 		const { error } = await createClient().auth.signInWithOAuth({
 			provider: "google",
@@ -57,7 +57,7 @@ export default function LoginForm({ onBack }: LoginFormProps) {
 
 		if (error) {
 			setIsLoading(false);
-			setMessage(error.message);
+			toast.error(error.message);
 		}
 	}
 
@@ -77,11 +77,6 @@ export default function LoginForm({ onBack }: LoginFormProps) {
 			</CardHeader>
 			<CardContent className="px-7 pb-6">
 				<form className="login-form gap-5" onSubmit={handleSubmit}>
-					<Button className="h-11 w-full gap-3 rounded-xl border-[#e2e5de] bg-white/70 text-[12px] text-[#23302d] shadow-none hover:bg-[#f8f7f4]" variant="outline" type="button" onClick={handleGoogleSignIn} disabled={isLoading}>
-						<span className="grid size-5 place-items-center rounded-full bg-[#4285f4] text-[11px] font-bold text-white">G</span>
-						Continue with Google
-					</Button>
-					<div className="flex items-center gap-3 text-[10px] text-[#a9afaa] before:h-px before:flex-1 before:bg-[#e8e5df] after:h-px after:flex-1 after:bg-[#e8e5df]">or continue with email</div>
 					<div className="grid gap-2">
 						<Label className="text-[10px] uppercase tracking-[.08em] text-[#607069]" htmlFor="email">Email address</Label>
 						<Input className="h-11 rounded-xl border-[#e2e5de] bg-white/70 px-3 text-[12px] shadow-none placeholder:text-[#a9afaa] focus-visible:border-[#ef795f] focus-visible:ring-[#ef795f]/20" id="email" type="email" placeholder="you@example.com" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
@@ -89,7 +84,7 @@ export default function LoginForm({ onBack }: LoginFormProps) {
 					<div className="grid gap-2">
 						<div className="flex items-center justify-between">
 							<Label className="text-[10px] uppercase tracking-[.08em] text-[#607069]" htmlFor="password">Password</Label>
-							<Button className="password-label h-auto p-0 text-[10px] text-[#ef795f]" variant="link" size="sm" type="button">
+							<Button className="password-label h-auto p-0 text-[10px] text-[#ef795f]" variant="link" size="sm" type="button" onClick={onForgotPassword}>
 								Forgot password?
 							</Button>
 						</div>
@@ -99,11 +94,20 @@ export default function LoginForm({ onBack }: LoginFormProps) {
 						<span>{isLoading ? "Logging in..." : "Log in"}</span>
 						<ArrowUpRight aria-hidden="true" size={16} />
 					</Button>
-					{message && <p className="text-[11px] text-[#7b8780]" role="status">{message}</p>}
+					<div className="flex items-center gap-3 text-[10px] text-[#a9afaa] before:h-px before:flex-1 before:bg-[#e8e5df] after:h-px after:flex-1 after:bg-[#e8e5df]">or continue with</div>
+					<Button className="h-11 w-full gap-3 rounded-xl border-[#e2e5de] bg-white/70 text-[12px] text-[#23302d] shadow-none hover:bg-[#f8f7f4]" variant="outline" type="button" onClick={handleGoogleSignIn} disabled={isLoading}>
+						<svg aria-hidden="true" className="size-5" viewBox="0 0 24 24">
+							<path fill="#4285F4" d="M21.35 12.27c0-.71-.06-1.4-.18-2.05H12v3.88h5.23a4.47 4.47 0 0 1-1.94 2.94v2.45h3.15c1.84-1.69 2.91-4.18 2.91-7.22Z" />
+							<path fill="#34A853" d="M12 21.75c2.63 0 4.84-.87 6.45-2.36l-3.15-2.45c-.87.58-1.98.93-3.3.93-2.54 0-4.69-1.72-5.46-4.03H3.29v2.53A9.74 9.74 0 0 0 12 21.75Z" />
+							<path fill="#FBBC05" d="M6.54 13.84A5.86 5.86 0 0 1 6.23 12c0-.64.11-1.26.31-1.84V7.63H3.29A9.75 9.75 0 0 0 2.25 12c0 1.57.38 3.05 1.04 4.37l3.25-2.53Z" />
+							<path fill="#EA4335" d="M12 6.13c1.43 0 2.71.49 3.72 1.46l2.79-2.79C16.84 3.23 14.63 2.25 12 2.25a9.74 9.74 0 0 0-8.71 5.38l3.25 2.53c.77-2.31 2.92-4.03 5.46-4.03Z" />
+						</svg>
+						Sign in with Google
+					</Button>
 				</form>
 			</CardContent>
 			<CardFooter className="flex-col gap-4 border-0 bg-transparent px-7 pb-7 pt-0">
-				<p className="login-signup">New to youme? <a href="#start">Create an account</a></p>
+				<p className="login-signup">New to youme? <button type="button" onClick={onCreateAccount}>Create an account</button></p>
 				<div className="flex items-center gap-2 text-[10px] text-[#91a098]">
 					<ShieldCheck aria-hidden="true" size={14} className="text-[#77a78a]" />
 					Your conversations stay private.

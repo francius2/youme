@@ -2,7 +2,9 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { FormEvent, useState } from "react";
+import ForgotPassword from "@/components/partials/forgotPassword";
 import LoginForm from "@/components/partials/loginForm";
+import SignUp from "@/components/partials/signUp";
 
 type Conversation = {
   id: string;
@@ -78,6 +80,8 @@ function Avatar({ conversation, large = false }: { conversation: Conversation; l
 
 export default function Home() {
   const [showLogin, setShowLogin] = useState(false);
+  const [showSignUp, setShowSignUp] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [selectedId, setSelectedId] = useState("benj");
   const [query, setQuery] = useState("");
   const [draft, setDraft] = useState("");
@@ -117,8 +121,28 @@ export default function Home() {
                 exit={{ opacity: 0, x: -18 }}
                 transition={{ duration: 0.28, ease: "easeOut" }}
               >
-                <LoginForm onBack={() => setShowLogin(false)} />
+                <LoginForm onBack={() => setShowLogin(false)} onCreateAccount={() => { setShowLogin(false); setShowSignUp(true); }} onForgotPassword={() => { setShowLogin(false); setShowForgotPassword(true); }} />
               </motion.div>
+              ) : showForgotPassword ? (
+                <motion.div
+                key="forgot-password"
+                initial={{ opacity: 0, x: 18 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -18 }}
+                transition={{ duration: 0.28, ease: "easeOut" }}
+                >
+                <ForgotPassword onBack={() => { setShowForgotPassword(false); setShowLogin(true); }} />
+                </motion.div>
+              ) : showSignUp ? (
+                <motion.div
+                key="signup"
+                initial={{ opacity: 0, x: 18 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -18 }}
+                transition={{ duration: 0.28, ease: "easeOut" }}
+                >
+                <SignUp onBack={() => setShowSignUp(false)} />
+                </motion.div>
             ) : (
               <motion.div
                 key="landing"
